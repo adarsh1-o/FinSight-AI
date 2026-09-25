@@ -1,0 +1,17 @@
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+
+# Python runtime and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
