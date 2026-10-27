@@ -1,0 +1,33 @@
+INFO:     127.0.0.1:64919 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56472 - "GET /api/date-range HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51814 - "GET /api/categories HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62253 - "GET /api/payment-methods HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62254 - "GET /api/locations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61038 - "GET /api/transaction-types HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52978 - "GET /api/statuses HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57105 - "GET /api/kpis/?date_from=2023-01-01&date_to=2024-02-29 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60307 - "GET /api/trends/monthly?date_from=2023-01-01&date_to=2024-02-29 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56309 - "GET /api/transactions?date_from=2023-01-01&date_to=2024-02-29&limit=1000 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61912 - "GET /api/anomalies/summary?date_from=2023-01-01&date_to=2024-02-29 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49886 - "GET /api/anomalies/?date_from=2023-01-01&date_to=2024-02-29&limit=15 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54065 - "GET /api/segments/summary?date_from=2023-01-01&date_to=2024-02-29 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53377 - "GET /api/customers/top?date_from=2023-01-01&date_to=2024-02-29&limit=10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56738 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:56738 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:56738 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56738 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62937 - "GET /api/date-range HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56920 - "GET /api/categories HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64701 - "GET /api/payment-methods HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57751 - "GET /api/locations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57556 - "GET /api/transaction-types HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54743 - "GET /api/statuses HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54745 - "GET /api/kpis/?date_from=2023-01-01&date_to=2024-02-29 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65152 - "GET /api/trends/monthly?date_from=2023-01-01&date_to=2024-02-29 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51963 - "GET /api/transactions?date_from=2023-01-01&date_to=2024-02-29&limit=1000 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61388 - "GET /api/anomalies/summary?date_from=2023-01-01&date_to=2024-02-29 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62515 - "GET /api/anomalies/?date_from=2023-01-01&date_to=2024-02-29&limit=15 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51759 - "GET /api/segments/summary?date_from=2023-01-01&date_to=2024-02-29 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50545 - "GET /api/customers/top?date_from=2023-01-01&date_to=2024-02-29&limit=10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64736 - "POST /api/ai/query HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63252 - "POST /api/ai/query HTTP/1.1" 200 OK
