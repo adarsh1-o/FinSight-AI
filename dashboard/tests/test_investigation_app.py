@@ -50,9 +50,12 @@ def install_api_mocks(monkeypatch):
     investigation_calls: list[dict] = []
     export_calls: list[dict] = []
     downloaded_csv: list[bytes] = []
+    recent_calls: list[dict] = []
+    api_calls: list[tuple[str, dict]] = []
 
     def fetch_data(endpoint: str, params: dict | None = None):
         params = dict(params or {})
+        api_calls.append((endpoint, params.copy()))
         if endpoint == "/date-range":
             return {"min_date": "2024-01-01", "max_date": "2024-02-28"}
         if endpoint == "/categories":
@@ -67,6 +70,10 @@ def install_api_mocks(monkeypatch):
                     "score_note": "not a fraud probability"}
         if endpoint == "/transactions":
             return ROWS
+        if endpoint == "/transactions/recent":
+            recent_calls.append(params.copy())
+            frame = pd.DataFrame(filter_rows(params)).sort_values("transaction_date", ascending=False)
+            return frame.head(int(params.get("limit", 10))).to_dict(orient="records")
         if endpoint == "/kpis/":
             return {"total_transactions": 4, "total_transaction_amount": 490, "average_transaction_amount": 122.5,
                     "unique_customers": 4, "potential_anomalies": 2, "anomaly_percentage": 50}
@@ -75,7 +82,7 @@ def install_api_mocks(monkeypatch):
         if endpoint == "/transactions/summary/categories":
             return [
                 {"merchant_category": "Amazon", "transaction_count": 2, "total_amount": 420, "average_amount": 210},
-                {"merchant_category": "Grocery", "transaction_count": 2, "total_amount": 70, "average_amount": 35},
+                {"merchant_category": "Grocery", "transaction_count": 2, "total_amount": 70, "average_amount": 35, "potential_anomalies": 1},
             ]
         if endpoint == "/anomalies/summary":
             return {"iqr_anomaly_count": 0, "ml_anomaly_count": 2, "overlap_count": 0, "anomaly_percentage": 50}
@@ -102,7 +109,8 @@ def install_api_mocks(monkeypatch):
 
     monkeypatch.setattr(api_client, "fetch_data", fetch_data)
     monkeypatch.setattr(api_client, "download_data", download_data)
-    return investigation_calls, export_calls, downloaded_csv
+    monkeypatch.setattr(api_client, "check_api_health", lambda: True)
+    return investigation_calls, export_calls, downloaded_csv, recent_calls, api_calls
 
 
 def widget(elements, key: str):
@@ -114,11 +122,46 @@ def visible_investigation_ids(at) -> set[str]:
     return set(table["transaction_id"].astype(str))
 
 
+def navigate(at, section: str):
+    control = next(element for element in at.segmented_control if element.key == "navigation_section")
+    return control.set_value(section).run()
+
+
+def test_api_health_indicator_uses_fastapi_health_endpoint(monkeypatch):
+    requests = api_client.requests
+    api_client.check_api_health.clear()
+    calls = []
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"status": "ok"}
+
+    def fake_get(url, timeout):
+        calls.append((url, timeout))
+        return Response()
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    assert api_client.check_api_health() is True
+    assert calls == [("http://localhost:8000/health", 5)]
+    api_client.check_api_health.clear()
+
+    def fail_get(url, timeout):
+        raise requests.ConnectionError("unavailable")
+
+    monkeypatch.setattr(requests, "get", fail_get)
+    assert api_client.check_api_health() is False
+    api_client.check_api_health.clear()
+
+
 def test_investigation_filter_changes_and_export_follow_active_filters(monkeypatch):
     from streamlit.testing.v1 import AppTest
 
-    calls, exports, downloaded_csv = install_api_mocks(monkeypatch)
+    calls, exports, downloaded_csv, _, _ = install_api_mocks(monkeypatch)
     at = AppTest.from_file(str(APP_PATH)).run(timeout=30)
+    at = navigate(at, "Investigate")
     assert not at.exception
     assert visible_investigation_ids(at) == {"t-1", "t-2", "t-3", "t-4"}
     assert calls[-1]["date_from"] == "2024-01-01" and calls[-1]["date_to"] == "2024-02-28"
@@ -161,14 +204,17 @@ def test_investigation_filter_changes_and_export_follow_active_filters(monkeypat
 def test_investigation_empty_results_and_invalid_amount_range(monkeypatch):
     from streamlit.testing.v1 import AppTest
 
-    calls, exports, downloaded_csv = install_api_mocks(monkeypatch)
+    calls, exports, downloaded_csv, _, _ = install_api_mocks(monkeypatch)
     at = AppTest.from_file(str(APP_PATH)).run(timeout=30)
+    at = navigate(at, "Investigate")
     previous_call_count = len(calls)
+    previous_export_count = len(exports)
+    previous_download_count = len(downloaded_csv)
     at = widget(at.text_input, "investigation_id").set_value("no-match").run()
     assert not at.exception and len(calls) == previous_call_count + 1
     assert "No transactions match the investigation filters." in " ".join(element.value for element in at.markdown)
-    assert len(exports) == previous_call_count  # no CSV export is requested for an empty result
-    assert len(downloaded_csv) == previous_call_count
+    assert len(exports) == previous_export_count  # no CSV export is requested for an empty result
+    assert len(downloaded_csv) == previous_download_count
 
     previous_call_count = len(calls)
     at = widget(at.number_input, "investigation_min").set_value(200).run()
@@ -188,11 +234,10 @@ def test_dashboard_kpis_match_filtered_api_response(monkeypatch):
     assert not at.exception
     values = {metric.label: metric.value for metric in at.metric}
     assert values["Total transaction value"] == "$490.00"
-    assert values["Transactions"] == "4"
+    assert values["Transactions analyzed"] == "4"
     assert values["Potential anomalies"] == "2"
     assert values["Anomaly rate"] == "50.00%"
     assert values["Active customers"] == "4"
-    assert values["Average transaction"] == "$122.50"
 
 
 def test_assistant_receives_active_dashboard_filters_and_shows_grounded_evidence(monkeypatch):
@@ -208,6 +253,7 @@ def test_assistant_receives_active_dashboard_filters_and_shows_grounded_evidence
 
     monkeypatch.setattr(api_client, "post_data", post_data)
     at = AppTest.from_file(str(APP_PATH)).run(timeout=30)
+    at = navigate(at, "AI Assistant")
     date_widget = next(element for element in at.date_input if element.label == "Analysis period")
     at = date_widget.set_value((date(2024, 2, 1), date(2024, 2, 28))).run()
     category_widget = next(element for element in at.selectbox if element.label == "Merchant Category")
@@ -226,3 +272,41 @@ def test_assistant_receives_active_dashboard_filters_and_shows_grounded_evidence
     assert payload["filters"]["date_from"] == "2024-02-01"
     assert payload["filters"]["date_to"] == "2024-02-28"
     assert any("Four transactions were in the supplied result." in item.value for item in at.markdown)
+
+
+def test_overview_command_center_uses_active_filters_and_navigation(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    investigation_calls, _, _, recent_calls, api_calls = install_api_mocks(monkeypatch)
+    at = AppTest.from_file(str(APP_PATH)).run(timeout=30)
+    assert not at.exception
+    assert at.segmented_control[0].value == "Overview"
+    assert len(at.get("plotly_chart")) >= 5
+    assert any(params.get("anomaly_status") == "flagged" for params in investigation_calls)
+
+    date_widget = next(element for element in at.date_input if element.label == "Analysis period")
+    at = date_widget.set_value((date(2024, 2, 1), date(2024, 2, 28))).run()
+    category_widget = next(element for element in at.selectbox if element.label == "Merchant Category")
+    at = category_widget.set_value("Amazon").run()
+    recent_params = recent_calls[-1]
+    assert recent_params["date_from"] == "2024-02-01"
+    assert recent_params["date_to"] == "2024-02-28"
+    assert recent_params["merchant_category"] == "Amazon"
+    category_params = next(params for endpoint, params in reversed(api_calls) if endpoint == "/transactions/summary/categories")
+    assert category_params["merchant_category"] == "Amazon"
+
+    status_widget = next(element for element in at.selectbox if element.key == "overview_activity_status")
+    at = status_widget.set_value("flagged").run()
+    search_widget = next(element for element in at.text_input if element.key == "overview_transaction_search")
+    at = search_widget.set_value("t-3").run()
+    assert not at.exception
+    assert recent_calls[-1]["anomaly_status"] == "flagged"
+    assert recent_calls[-1]["transaction_id"] == "t-3"
+    assert recent_calls[-1]["merchant_category"] == "Amazon"
+
+    at = widget(at.button, "open-investigation-workspace").click().run()
+    assert not at.exception
+    assert at.segmented_control[0].value == "Investigate"
+    for section in ("Transactions", "Anomalies", "Customers", "AI Assistant", "Overview"):
+        at = navigate(at, section)
+        assert not at.exception

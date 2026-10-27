@@ -44,6 +44,19 @@ def test_get_monthly_trends():
     kpis = client.get("/api/kpis/").json()
     assert sum(row["potential_anomalies"] for row in trends) == kpis["potential_anomalies"]
 
+def test_recent_transactions_support_search_filters_and_anomaly_status():
+    baseline = client.get("/api/transactions/recent", params={"limit": 1})
+    assert baseline.status_code == 200 and baseline.json()
+    transaction_id = baseline.json()[0]["transaction_id"]
+    search = client.get("/api/transactions/recent", params={"transaction_id": transaction_id[:6], "limit": 10})
+    assert search.status_code == 200
+    assert search.json() and all(transaction_id[:6].casefold() in row["transaction_id"].casefold() for row in search.json())
+
+    flagged = client.get("/api/transactions/recent", params={"anomaly_status": "flagged", "merchant_category": "Grocery", "limit": 10})
+    assert flagged.status_code == 200
+    assert all(row["ml_anomaly"] == 1 and row["merchant_category"] == "Grocery" for row in flagged.json())
+    assert client.get("/api/transactions/recent", params={"anomaly_status": "fraud"}).status_code == 422
+
 def test_get_category_summary_matches_filtered_kpis():
     response = client.get("/api/transactions/summary/categories", params={"merchant_category": "Grocery"})
     assert response.status_code == 200
@@ -53,6 +66,7 @@ def test_get_category_summary_matches_filtered_kpis():
     filtered_kpis = client.get("/api/kpis/", params={"merchant_category": "Grocery"}).json()
     assert sum(row["transaction_count"] for row in categories) == filtered_kpis["total_transactions"]
     assert sum(row["total_amount"] for row in categories) == pytest.approx(filtered_kpis["total_transaction_amount"])
+    assert sum(row["potential_anomalies"] for row in categories) == filtered_kpis["potential_anomalies"]
     
 def test_invalid_query_parameter():
     response = client.get("/api/transactions?limit=-1") # Limit should be >= 1

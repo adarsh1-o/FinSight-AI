@@ -4,6 +4,18 @@ import streamlit as st
 API_URL = "http://localhost:8000/api"
 
 
+@st.cache_data(ttl=10, show_spinner=False)
+def check_api_health() -> bool:
+    """Check FastAPI's health endpoint without surfacing request details in the UI."""
+    health_url = f"{API_URL.removesuffix('/api')}/health"
+    try:
+        response = requests.get(health_url, timeout=5)
+        response.raise_for_status()
+        return response.json().get("status") == "ok"
+    except (requests.RequestException, ValueError, AttributeError):
+        return False
+
+
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_data(endpoint: str, params: dict | None = None):
     url = f"{API_URL}{endpoint}"

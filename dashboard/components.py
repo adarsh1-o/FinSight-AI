@@ -17,37 +17,37 @@ def section_heading(title: str, caption: str = "") -> None:
 def render_kpis(kpis: dict) -> None:
     cards = [
         ("Total transaction value", f"${(kpis.get('total_transaction_amount') or 0):,.2f}", "Value across the selected activity", ":material/payments:"),
-        ("Transactions", f"{(kpis.get('total_transactions') or 0):,}", "Count in the selected period", ":material/receipt_long:"),
+        ("Transactions analyzed", f"{(kpis.get('total_transactions') or 0):,}", "Count in the selected period", ":material/receipt_long:"),
         ("Potential anomalies", f"{(kpis.get('potential_anomalies') or 0):,}", "Model-flagged activity; not confirmed fraud", ":material/warning:"),
         ("Anomaly rate", f"{(kpis.get('anomaly_percentage') or 0):.2f}%", "Share of transactions flagged by the model", ":material/monitoring:"),
         ("Active customers", f"{(kpis.get('unique_customers') or 0):,}", "Unique customers with activity in this period", ":material/groups:"),
-        ("Average transaction", f"${(kpis.get('average_transaction_amount') or 0):,.2f}", "Average value per transaction", ":material/attach_money:"),
     ]
-    for row_start in range(0, len(cards), 3):
-        with st.container(horizontal=True, gap="small"):
-            for label, value, description, icon in cards[row_start:row_start + 3]:
-                st.metric(label, value, help=description, icon=icon, border=True)
+    with st.container(key="kpi-strip", horizontal=True, gap="small", border=True):
+        for label, value, description, icon in cards:
+            st.metric(label, value, help=description, icon=icon)
 
 
 def chart_layout(fig, height: int = 320):
+    has_legend = len(fig.data) > 1 and any(getattr(trace, "name", "") for trace in fig.data)
     fig.update_layout(
         height=height,
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        font={"family": "DM Sans", "color": "#b8c6d9", "size": 12},
-        title_font={"family": "Space Grotesk", "color": "#e8eef8", "size": 15},
-        margin={"l": 12, "r": 12, "t": 42, "b": 12},
-        showlegend=False,
+        font={"family": "sans-serif", "color": "#92A8BE", "size": 11},
+        title_font={"family": "sans-serif", "color": "#F1F5F9", "size": 14},
+        margin={"l": 12, "r": 12, "t": 38, "b": 12},
+        showlegend=has_legend,
+        legend={"orientation": "h", "y": 1.12, "x": 0, "font": {"size": 10}},
         hoverlabel={"bgcolor": "#16243a", "font": {"color": "#e8eef8"}},
     )
-    fig.update_xaxes(showgrid=False, linecolor="#22344c", zeroline=False)
-    fig.update_yaxes(showgrid=True, gridcolor="#1d2e45", zeroline=False)
+    fig.update_xaxes(showgrid=False, linecolor="#203C56", zeroline=False, automargin=True)
+    fig.update_yaxes(showgrid=True, gridcolor="rgba(32,60,86,.55)", linecolor="#203C56", zeroline=False, automargin=True)
     return fig
 
 
 def render_chart(fig, key: str, height: int = 320) -> None:
-    st.plotly_chart(chart_layout(fig, height), width="stretch", config={"displayModeBar": False}, key=key)
+    st.plotly_chart(chart_layout(fig, height), width="stretch", config={"displayModeBar": False, "responsive": True}, key=key)
 
 
 def render_empty(message: str) -> None:

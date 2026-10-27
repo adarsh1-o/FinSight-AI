@@ -44,12 +44,40 @@ def get_transactions(
     return filtered.head(limit).to_dict(orient="records")
 
 @router.get("/transactions/recent")
-def get_recent_transactions(limit: int = Query(10, ge=1, le=100)):
-    df = data_service.get_transactions()
+def get_recent_transactions(
+    limit: int = Query(10, ge=1, le=100),
+    anomaly_status: str = Query("all", pattern="^(all|flagged|normal)$"),
+    transaction_id: str | None = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    transaction_type: Optional[str] = None,
+    merchant_category: Optional[str] = None,
+    payment_method: Optional[str] = None,
+    status: Optional[str] = None,
+    location: Optional[str] = None,
+    customer_id: Optional[str] = None,
+):
+    df = data_service.apply_filters(
+        data_service.get_transactions(),
+        date_from=date_from,
+        date_to=date_to,
+        transaction_type=transaction_type,
+        merchant_category=merchant_category,
+        payment_method=payment_method,
+        status=status,
+        location=location,
+        customer_id=customer_id,
+    )
+    if transaction_id and "transaction_id" in df:
+        df = df[df["transaction_id"].astype(str).str.contains(transaction_id, case=False, regex=False, na=False)]
+    if anomaly_status == "flagged" and "ml_anomaly" in df:
+        df = df[df["ml_anomaly"] == 1]
+    elif anomaly_status == "normal" and "ml_anomaly" in df:
+        df = df[df["ml_anomaly"] == 0]
     if df.empty:
         return []
-    
-    sorted_df = df.sort_values(by="transaction_date", ascending=False).head(limit)
+
+    sorted_df = df.sort_values(by="transaction_date", ascending=False).head(limit).copy()
     if 'transaction_date' in sorted_df.columns:
         sorted_df['transaction_date'] = sorted_df['transaction_date'].dt.strftime('%Y-%m-%dT%H:%M:%S')
     return sorted_df.to_dict(orient="records")
@@ -115,9 +143,12 @@ def get_category_summary(
     )
     if df.empty or 'merchant_category' not in df.columns:
         return []
-    summary = df.groupby('merchant_category').agg(
-        transaction_count=('transaction_id', 'count'),
-        total_amount=('amount', 'sum'),
-        average_amount=('amount', 'mean'),
-    ).reset_index().sort_values('total_amount', ascending=False)
+    aggregations = {
+        'transaction_count': ('transaction_id', 'count'),
+        'total_amount': ('amount', 'sum'),
+        'average_amount': ('amount', 'mean'),
+    }
+    if 'ml_anomaly' in df.columns:
+        aggregations['potential_anomalies'] = ('ml_anomaly', 'sum')
+    summary = df.groupby('merchant_category').agg(**aggregations).reset_index().sort_values('total_amount', ascending=False)
     return summary.to_dict(orient="records")

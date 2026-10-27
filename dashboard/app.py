@@ -2,9 +2,11 @@ from datetime import date
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
+from plotly.subplots import make_subplots
 
-from dashboard.api_client import download_data, fetch_data, post_data
+from dashboard.api_client import check_api_health, download_data, fetch_data, post_data
 from dashboard.components import format_table, render_chart, render_empty, render_kpis, section_heading
 from dashboard.styles import apply_styles
 
@@ -48,65 +50,232 @@ def render_filters() -> tuple[dict, bool]:
     return params, reset
 
 
-def render_header(api_online: bool) -> None:
-    title, status = st.columns([5, 1], vertical_alignment="center")
-    with title:
-        st.caption("FINANCIAL INTELLIGENCE PLATFORM")
-        st.title("FinSight AI", icon=":material/account_balance:")
-        st.markdown('<div class="brand-subtitle">Transaction analytics, anomaly review and customer intelligence</div>', unsafe_allow_html=True)
-    with status:
-        if api_online:
-            st.badge("Analytics API available", icon=":material/check_circle:", color="green")
-        else:
-            st.badge("Analytics API unavailable", icon=":material/error:", color="red")
+def render_header(api_healthy: bool, params: dict) -> None:
+    with st.container(key="command-header"):
+        brand, status = st.columns([4, 2], vertical_alignment="center")
+        with brand:
+            st.title("FinSight AI", icon=":material/account_balance:")
+            st.caption("Financial Intelligence & Anomaly Analytics")
+        with status:
+            st.badge(
+                "API healthy" if api_healthy else "API unavailable",
+                icon=":material/check_circle:" if api_healthy else ":material/error:",
+                color="green" if api_healthy else "red",
+            )
+            st.caption(f"Analysis period · {params.get('date_from', '—')} to {params.get('date_to', '—')}")
+    st.subheader("Financial Intelligence Command Center", icon=":material/monitoring:")
 
 
-def render_overview(kpis: dict, trends: list, categories: list, segments: list) -> None:
-    section_heading("Executive Overview", "A focused view of transaction scale and value across the selected period.")
-    render_kpis(kpis)
+def render_financial_activity(trends: list) -> None:
     if not trends:
-        render_empty("No trend data is available for the selected filters.")
+        render_empty("No transaction activity is available for the selected period.")
+        return
+    frame = pd.DataFrame(trends)
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    fig.add_trace(
+        go.Bar(
+            x=frame["month"], y=frame["transaction_count"], name="Transactions",
+            marker={"color": "rgba(79,143,255,.48)"},
+            hovertemplate="%{x}<br>Transactions: %{y:,}<extra></extra>",
+        ),
+        secondary_y=True,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=frame["month"], y=frame["transaction_amount"], name="Transaction value",
+            mode="lines+markers", line={"color": "#35D6E7", "width": 3},
+            marker={"size": 6}, fill="tozeroy", fillcolor="rgba(53,214,231,.10)",
+            hovertemplate="%{x}<br>Transaction value: $%{y:,.2f}<extra></extra>",
+        ),
+        secondary_y=False,
+    )
+    fig.update_xaxes(title_text="Month", tickangle=-25)
+    fig.update_yaxes(title_text="Transaction value ($)", tickprefix="$", tickformat="~s", secondary_y=False)
+    fig.update_yaxes(title_text="Transactions", tickformat=",", showgrid=False, secondary_y=True)
+    render_chart(fig, "command-financial-activity", 480)
+
+
+def _navigate_to(section: str) -> None:
+    st.session_state["navigation_section"] = section
+
+
+def render_transaction_activity(params: dict) -> None:
+    st.subheader("Transaction activity", icon=":material/swap_horiz:")
+    st.caption("Recent transactions within the active dashboard filters.")
+    activity_status = st.selectbox(
+        "Activity status", ["all", "flagged", "normal"],
+        format_func=lambda value: {"all": "All activity", "flagged": "Potential anomalies", "normal": "Model normal"}[value],
+        key="overview_activity_status",
+    )
+    transaction_search = st.text_input(
+        "Search transaction ID", placeholder="Filter transaction ID", type="search",
+        key="overview_transaction_search",
+    ).strip()
+    query = {**params, "limit": 8, "anomaly_status": activity_status}
+    if transaction_search:
+        query["transaction_id"] = transaction_search
+    items = fetch_data("/transactions/recent", params=query) or []
+    if not items:
+        render_empty("No recent transactions match these filters.")
+        return
+
+    for item in items:
+        status_label = "Potential anomaly" if item.get("ml_anomaly") == 1 else "Model normal"
+        status_color = "orange" if item.get("ml_anomaly") == 1 else "green"
+        with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+            st.markdown(f"**{item.get('transaction_id', 'Unknown ID')}** · ${(item.get('amount') or 0):,.2f}")
+            st.badge(status_label, color=status_color)
+        date_value = pd.to_datetime(item.get("transaction_date"), errors="coerce")
+        date_label = date_value.strftime("%b %d, %Y · %H:%M") if pd.notna(date_value) else "Date unavailable"
+        st.caption(f"{date_label} · {item.get('merchant_category', 'Uncategorized')} · {item.get('customer_id', 'Customer unavailable')}")
+
+    transaction_ids = [str(item.get("transaction_id")) for item in items if item.get("transaction_id")]
+    if transaction_ids:
+        selected_id = st.selectbox("Inspect transaction", transaction_ids, key="overview_transaction_detail")
+        selected = next((item for item in items if str(item.get("transaction_id")) == selected_id), {})
+        with st.expander("Selected transaction details", icon=":material/receipt_long:"):
+            details = {key: selected.get(key) for key in (
+                "transaction_id", "transaction_date", "customer_id", "amount", "transaction_type",
+                "merchant_category", "payment_method", "location", "status", "isolation_prediction", "isolation_score",
+            ) if key in selected}
+            st.json(details, expanded=True)
+
+
+def render_anomaly_monitor(params: dict, trends: list, categories: list, summary: dict) -> None:
+    st.subheader("Anomaly intelligence", icon=":material/health_and_safety:")
+    st.caption("Model-flagged activity indicates unusual patterns, not confirmed fraud.")
+    flagged_col, rate_col = st.columns(2)
+    with flagged_col:
+        st.metric("Flagged", f"{summary.get('ml_anomaly_count', 0):,}", help="Potential anomalies identified by the model")
+    with rate_col:
+        st.metric("Rate", f"{summary.get('anomaly_percentage', 0):.2f}%", help="Share of filtered transactions flagged by the model")
+    st.caption(f"IQR outliers: {summary.get('iqr_anomaly_count', 0):,} · Overlap: {summary.get('overlap_count', 0):,}")
+
+    trend_frame = pd.DataFrame(trends)
+    if not trend_frame.empty:
+        volume_fig = px.line(
+            trend_frame, x="month", y="transaction_count", title="Transaction volume",
+            labels={"month": "Month", "transaction_count": "Transactions"},
+            markers=True, color_discrete_sequence=["#4F8FFF"],
+        )
+        volume_fig.update_traces(hovertemplate="%{x}<br>Transactions: %{y:,}<extra></extra>")
+        volume_fig.update_yaxes(tickformat=",")
+        render_chart(volume_fig, "monitor-transaction-volume", 180)
     else:
-        df = pd.DataFrame(trends)
-        first, second = st.columns(2)
-        with first:
-            fig = px.bar(df, x="month", y="transaction_count", labels={"month": "Month", "transaction_count": "Transactions"}, title="Monthly transaction volume", color_discrete_sequence=["#5b8def"])
-            fig.update_traces(hovertemplate="%{x}<br>Transactions: %{y:,}<extra></extra>")
-            fig.update_yaxes(tickformat=",")
-            render_chart(fig, "monthly-volume")
-        with second:
-            fig = px.area(df, x="month", y="transaction_amount", labels={"month": "Month", "transaction_amount": "Transaction value ($)"}, title="Monthly transaction value", color_discrete_sequence=["#55c7d9"])
-            fig.update_traces(hovertemplate="%{x}<br>Value: $%{y:,.2f}<extra></extra>")
-            fig.update_yaxes(tickprefix="$", tickformat="~s")
-            render_chart(fig, "monthly-value")
+        render_empty("No volume trend is available for this period.")
 
-        if "potential_anomalies" in df:
-            fig = px.bar(df, x="month", y="potential_anomalies", labels={"month": "Month", "potential_anomalies": "Potential anomalies"}, title="Monthly model-flagged activity", color_discrete_sequence=["#f2b866"])
-            fig.update_traces(hovertemplate="%{x}<br>Potential anomalies: %{y:,}<extra></extra>")
-            fig.update_yaxes(tickformat=",")
-            render_chart(fig, "monthly-anomaly-activity")
-        else:
-            render_empty("Monthly potential anomaly counts are not available.")
+    if not trend_frame.empty and "potential_anomalies" in trend_frame:
+        anomaly_fig = px.bar(
+            trend_frame, x="month", y="potential_anomalies", title="Anomaly activity",
+            labels={"month": "Month", "potential_anomalies": "Potential anomalies"},
+            color_discrete_sequence=["#F5B942"],
+        )
+        anomaly_fig.update_traces(hovertemplate="%{x}<br>Potential anomalies: %{y:,}<extra></extra>")
+        render_chart(anomaly_fig, "monitor-anomaly-trend", 205)
+    else:
+        render_empty("No anomaly trend is available for this period.")
 
-    category_col, segment_col = st.columns(2)
+    category_frame = pd.DataFrame(categories)
+    if not category_frame.empty and "potential_anomalies" in category_frame:
+        category_frame = category_frame.sort_values("potential_anomalies", ascending=False).head(5).sort_values("potential_anomalies")
+        category_fig = px.bar(
+            category_frame, x="potential_anomalies", y="merchant_category", orientation="h",
+            title="Flagged by category", labels={"potential_anomalies": "Potential anomalies", "merchant_category": "Category"},
+            color_discrete_sequence=["#FF5874"],
+        )
+        category_fig.update_traces(hovertemplate="%{y}<br>Potential anomalies: %{x:,}<extra></extra>")
+        render_chart(category_fig, "monitor-category-anomalies", 220)
+    else:
+        render_empty("Category-level anomaly data is unavailable.")
+
+
+def render_flagged_feed(params: dict) -> None:
+    st.subheader("Investigation feed", icon=":material/search:")
+    st.caption("Highest-ranked model-flagged transactions for review.")
+    result = fetch_data("/investigations", params={
+        **params, "anomaly_status": "flagged", "page": 1, "page_size": 8,
+        "sort_by": "score", "order": "asc",
+    }) or {}
+    items = result.get("items", [])
+    if not items:
+        render_empty("No potential anomalies match the current filters.")
+        return
+    display = pd.DataFrame(items)
+    display = display[[column for column in ("transaction_id", "transaction_date", "amount", "merchant_category", "isolation_score") if column in display]]
+    display = display.rename(columns={
+        "transaction_id": "Transaction ID", "transaction_date": "Date", "amount": "Amount",
+        "merchant_category": "Category", "isolation_score": "Isolation score",
+    })
+    display = format_table(display, ["Amount"])
+    st.dataframe(display, width="stretch", hide_index=True, height=270)
+    st.caption("The isolation score ranks unusual records. It is not a fraud probability.")
+    transaction_ids = [str(item["transaction_id"]) for item in items if item.get("transaction_id")]
+    if transaction_ids:
+        selected_id = st.selectbox("Open flagged transaction", transaction_ids, key="overview_flagged_detail")
+        selected = next((item for item in items if str(item.get("transaction_id")) == selected_id), {})
+        with st.expander("Investigation context", icon=":material/receipt_long:"):
+            st.json({key: selected[key] for key in (
+                "transaction_id", "transaction_date", "customer_id", "amount", "merchant_category",
+                "payment_method", "status", "isolation_prediction", "isolation_score", "ml_anomaly",
+            ) if key in selected}, expanded=True)
+    st.button("Open investigation workspace", icon=":material/open_in_new:", on_click=_navigate_to, args=("Investigate",), key="open-investigation-workspace")
+
+
+def render_patterns(categories: list, segments: list) -> None:
+    st.subheader("Patterns & customer behavior", icon=":material/insights:")
+    category_col, segment_col = st.columns(2, gap="small")
     with category_col:
         if categories:
-            category_df = pd.DataFrame(categories).head(8).sort_values("total_amount", ascending=True)
-            fig = px.bar(category_df, x="total_amount", y="merchant_category", orientation="h", labels={"total_amount": "Transaction value ($)", "merchant_category": "Merchant category"}, title="Category spend", color_discrete_sequence=["#4bd19b"])
+            frame = pd.DataFrame(categories).sort_values("total_amount", ascending=True).tail(7)
+            fig = px.bar(
+                frame, x="total_amount", y="merchant_category", orientation="h", title="Category activity",
+                labels={"total_amount": "Transaction value ($)", "merchant_category": "Category"},
+                color_discrete_sequence=["#35D6E7"],
+            )
             fig.update_traces(hovertemplate="%{y}<br>Transaction value: $%{x:,.2f}<extra></extra>")
             fig.update_xaxes(tickprefix="$", tickformat="~s")
-            render_chart(fig, "overview-category-spend", 360)
+            render_chart(fig, "pattern-category-value", 285)
         else:
             render_empty("No category activity matches the selected filters.")
     with segment_col:
         if segments:
-            segment_df = pd.DataFrame(segments).sort_values("customer_count", ascending=True)
-            fig = px.bar(segment_df, x="customer_count", y="segment_name", orientation="h", labels={"customer_count": "Customers", "segment_name": "Customer segment"}, title="Customer segment distribution", color_discrete_sequence=["#55c7d9"])
+            frame = pd.DataFrame(segments).sort_values("customer_count", ascending=True)
+            fig = px.bar(
+                frame, x="customer_count", y="segment_name", orientation="h", title="Customer segments",
+                labels={"customer_count": "Customers", "segment_name": "Segment"},
+                color_discrete_sequence=["#4F8FFF"],
+            )
             fig.update_traces(hovertemplate="%{y}<br>Customers: %{x:,}<extra></extra>")
-            fig.update_xaxes(tickformat=",")
-            render_chart(fig, "overview-segment-distribution", 360)
+            render_chart(fig, "pattern-segment-count", 285)
         else:
             render_empty("No customer segment data matches the selected filters.")
+    st.button("Ask the grounded AI assistant", icon=":material/auto_awesome:", on_click=_navigate_to, args=("AI Assistant",), key="open-grounded-assistant")
+
+
+def render_overview(params: dict) -> None:
+    kpis = fetch_data("/kpis/", params=params) or {}
+    trends = fetch_data("/trends/monthly", params=params) or []
+    categories = fetch_data("/transactions/summary/categories", params=params) or []
+    segments = fetch_data("/segments/summary", params=params) or []
+    anomaly_summary = fetch_data("/anomalies/summary", params=params) or {}
+
+    render_kpis(kpis)
+    activity_col, chart_col, monitor_col = st.columns([0.25, 0.47, 0.28], gap="small", vertical_alignment="top")
+    with activity_col.container(border=True, height="stretch"):
+        render_transaction_activity(params)
+    with chart_col.container(border=True, height="stretch"):
+        st.subheader("Financial activity", icon=":material/area_chart:")
+        st.caption("Monthly transaction value and volume · active filters applied")
+        render_financial_activity(trends)
+    with monitor_col.container(border=True, height="stretch"):
+        render_anomaly_monitor(params, trends, categories, anomaly_summary)
+
+    st.subheader("Investigation & patterns", icon=":material/troubleshoot:")
+    feed_col, patterns_col = st.columns([0.95, 1.35], gap="small", vertical_alignment="top")
+    with feed_col.container(border=True, height="stretch"):
+        render_flagged_feed(params)
+    with patterns_col.container(border=True, height="stretch"):
+        render_patterns(categories, segments)
 
 
 def render_transactions(transactions: list) -> None:
@@ -192,7 +361,7 @@ def render_customers(params: dict, segments: list | None = None) -> None:
         st.dataframe(display[ordered], width="stretch", hide_index=True)
 
 
-def render_assistant() -> None:
+def render_assistant(params: dict) -> None:
     section_heading("AI financial assistant", "Ask grounded questions about FinSight analytics and project methodology.")
     examples = [
         "What is the total transaction value?",
@@ -291,31 +460,29 @@ params, reset = render_filters()
 if reset:
     st.cache_data.clear()
     st.rerun()
-health = fetch_data("/date-range")
-render_header(health is not None)
-kpis = fetch_data("/kpis/", params=params) or {}
-trends = fetch_data("/trends/monthly", params=params) or []
-category_summary = fetch_data("/transactions/summary/categories", params=params) or []
-segments = fetch_data("/segments/summary", params=params) or []
-transactions = fetch_data("/transactions", params={**params, "limit": 1000}) or []
-overview_tab, transaction_tab, anomaly_tab, investigation_tab, customer_tab, assistant_tab = st.tabs([
-    ":material/dashboard: Overview",
-    ":material/receipt_long: Transactions",
-    ":material/query_stats: Anomalies",
-    ":material/search: Investigate",
-    ":material/groups: Customers",
-    ":material/auto_awesome: AI assistant",
-])
-with overview_tab:
-    render_overview(kpis, trends, category_summary, segments)
-with transaction_tab:
+render_header(check_api_health(), params)
+active_section = st.segmented_control(
+    "Dashboard section",
+    ["Overview", "Transactions", "Anomalies", "Investigate", "Customers", "AI Assistant"],
+    default="Overview",
+    selection_mode="single",
+    label_visibility="collapsed",
+    key="navigation_section",
+)
+active_section = active_section or "Overview"
+
+if active_section == "Overview":
+    render_overview(params)
+elif active_section == "Transactions":
+    transactions = fetch_data("/transactions", params={**params, "limit": 1000}) or []
     render_transactions(transactions)
-with anomaly_tab:
+elif active_section == "Anomalies":
     render_anomalies(params)
-with investigation_tab:
+elif active_section == "Investigate":
     render_investigations(params)
-with customer_tab:
-    render_customers(params, segments)
-with assistant_tab:
-    render_assistant()
-st.caption("FinSight AI · Data → Analytics → ML → API → grounded AI")
+elif active_section == "Customers":
+    render_customers(params)
+else:
+    render_assistant(params)
+
+st.caption("FinSight AI · Data → Analytics → Model signals → API → grounded AI")
