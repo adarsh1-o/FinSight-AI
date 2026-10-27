@@ -14,6 +14,9 @@ class DataService:
             self.transactions_path = processed_dir / 'transactions_cleaned.csv'
 
         self.segments_path = processed_dir / 'customer_segments.csv'
+        self.raw_transactions_path = base_dir / 'data' / 'raw' / 'transactions.csv'
+        self.fraud_labels_path = base_dir / 'data' / 'raw' / 'fraud_labels.csv'
+        self.customers_path = base_dir / 'data' / 'raw' / 'customers.csv'
 
         # Load data into memory
         self._load_data()
@@ -38,6 +41,13 @@ class DataService:
 
     def get_segments(self) -> pd.DataFrame:
         return self.df_segments
+
+    def read_optional_csv(self, path: Path) -> pd.DataFrame:
+        """Load an optional local CSV without exposing its filesystem path in API output."""
+        try:
+            return pd.read_csv(path)
+        except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError):
+            return pd.DataFrame()
 
     def apply_filters(
         self,

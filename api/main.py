@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import ai, kpis, transactions, anomalies, customers, metadata
+from api.routers import ai, kpis, transactions, anomalies, customers, metadata, investigations
 
 app = FastAPI(
     title="FinSight AI Analytics API",
@@ -31,6 +31,7 @@ app.include_router(anomalies.router)
 app.include_router(customers.router)
 app.include_router(metadata.router)
 app.include_router(ai.router)
+app.include_router(investigations.router)
 
 @app.get("/health")
 def health_check():

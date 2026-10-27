@@ -1,41 +1,28 @@
-from typing import Any
-
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
 
-from api.ai.service import AIServiceError, GroundedAIService, LLMRequestError, MissingLLMCredentials
+from api.ai.service import AIServiceError, LLMRequestError, MissingLLMCredentials
+from api.assistant.schemas import AssistantRequest, AssistantResponse
+from api.assistant.service import AssistantService, AssistantServiceUnavailable
 
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
-ai_service = GroundedAIService()
-
-
-class AIQueryRequest(BaseModel):
-    question: str = Field(..., min_length=1, max_length=2000)
-    filters: dict[str, Any] = Field(default_factory=dict)
-
-
-class AIQueryResponse(BaseModel):
-    answer: str
-    intent: str
-    source: str
-    data: dict[str, Any]
+assistant_service = AssistantService()
 
 
 @router.post(
     "/query",
-    responses={
-        400: {"description": "Invalid or empty question"},
-        502: {"description": "Language model request failed"},
-        503: {"description": "Language model credentials are missing"},
-    },
+    response_model=AssistantResponse,
+    responses={400: {"description": "Invalid question"}, 502: {"description": "LLM provider failed"}, 503: {"description": "LLM credentials or retrieval service unavailable"}},
 )
-def query_ai(request: AIQueryRequest) -> AIQueryResponse:
+def query_ai(request: AssistantRequest) -> AssistantResponse:
+    """Validate the request and delegate assistant orchestration to the service."""
     try:
-        return ai_service.answer(request.question, request.filters)
+        return assistant_service.answer(request)
     except MissingLLMCredentials as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except LLMRequestError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
+        raise HTTPException(status_code=502, detail="The language model could not return a valid answer.") from error
     except AIServiceError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    except AssistantServiceUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error

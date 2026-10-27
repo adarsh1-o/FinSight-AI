@@ -33,3 +33,15 @@ def post_data(endpoint: str, payload: dict):
     except ValueError:
         st.error("The AI service returned an invalid response.")
     return None
+
+
+def download_data(endpoint: str, params: dict | None = None) -> bytes | None:
+    """Fetch a downloadable artifact through the existing API boundary."""
+    try:
+        response = requests.get(f"{API_URL}{endpoint}", params=params, timeout=30)
+        response.raise_for_status()
+        return response.content
+    except requests.RequestException as error:
+        status = error.response.status_code if error.response is not None else "unavailable"
+        st.error(f"Export request failed: {status}")
+        return None

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from api.ai.intent import Intent
 from api.ai.service import GroundedAIService, LLMClient, LLMRequestError, MissingLLMCredentials
+from api.assistant.schemas import AssistantResponse
 from api.main import app
 
 
@@ -67,7 +68,7 @@ def test_documentation_metric_question_returns_dictionary_evidence():
     fake = FakeLLM()
     result = GroundedAIService(fake).answer("What does transaction_date mean in the data dictionary?")
     assert result["intent"] == Intent.DOCUMENTATION.value
-    assert any(item["source"] == "data_dictionary.md" for item in result["data"]["documentation"])
+    assert any(item["source"].endswith("data_dictionary.md") for item in result["data"]["documentation"])
 
 
 def test_unsupported_question_does_not_call_llm():
@@ -97,11 +98,47 @@ def test_provider_failure_is_safe(monkeypatch):
         LLMClient(request=lambda *args, **kwargs: request()).complete("What is the total transaction value?", Intent.KPI, {}, {})
 
 
-def test_ai_endpoint_validates_request_without_real_llm(monkeypatch):
+def test_ai_endpoint_delegates_to_assistant_service_and_preserves_filters(monkeypatch):
     client = TestClient(app)
-    monkeypatch.setattr("api.routers.ai.ai_service", GroundedAIService(FakeLLM()))
-    response = client.post("/api/ai/query", json={"question": "What is the total transaction value?", "filters": {"merchant_category": "Amazon"}})
+    filters = {
+        "date_from": "2023-01-01",
+        "date_to": "2023-01-31",
+        "transaction_type": "purchase",
+        "merchant_category": "Amazon",
+        "payment_method": "card",
+        "status": "completed",
+        "location": "Boston",
+        "customer_id": "customer-1",
+    }
+    calls = []
+
+    class FakeAssistantService:
+        def answer(self, request):
+            calls.append(request)
+            return AssistantResponse(
+                answer="Assistant service placeholder",
+                intent="placeholder",
+                source="FinSight Assistant Service",
+                data={"filters": request.filters},
+            )
+
+    monkeypatch.setattr("api.routers.ai.assistant_service", FakeAssistantService())
+    response = client.post("/api/ai/query", json={"question": "What is the total transaction value?", "filters": filters})
+
     assert response.status_code == 200
     body = response.json()
-    assert body["intent"] == Intent.KPI.value
-    assert body["data"]["total_transactions"] < 100000
+    assert body == {
+        "answer": "Assistant service placeholder",
+        "intent": "placeholder",
+        "source": "FinSight Assistant Service",
+        "data": {"filters": filters},
+    }
+    assert len(calls) == 1
+    assert calls[0].question == "What is the total transaction value?"
+    assert calls[0].filters == filters
+
+
+def test_ai_endpoint_validates_question():
+    response = TestClient(app).post("/api/ai/query", json={"question": "", "filters": {}})
+
+    assert response.status_code == 422

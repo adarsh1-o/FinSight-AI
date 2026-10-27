@@ -1,0 +1,196 @@
+{
+  "raw_transactions": {
+    "available": true,
+    "rows": 100050,
+    "columns_count": 10,
+    "columns": [
+      "transaction_id",
+      "customer_id",
+      "account_id",
+      "transaction_date",
+      "amount",
+      "transaction_type",
+      "merchant_category",
+      "payment_method",
+      "location",
+      "status"
+    ],
+    "dtypes": {
+      "transaction_id": "object",
+      "customer_id": "object",
+      "account_id": "object",
+      "transaction_date": "object",
+      "amount": "float64",
+      "transaction_type": "object",
+      "merchant_category": "object",
+      "payment_method": "object",
+      "location": "object",
+      "status": "object"
+    },
+    "missing_by_column": {},
+    "duplicate_rows": 50,
+    "duplicate_transaction_ids": 50,
+    "missing_or_blank_transaction_ids": 0,
+    "invalid_amounts": 0,
+    "amount_summary": {
+      "count": 100050.0,
+      "mean": 67.69724387806097,
+      "std": 118.00215057135465,
+      "min": 0.17,
+      "25%": 14.66,
+      "50%": 32.87,
+      "75%": 74.0,
+      "max": 5235.62
+    },
+    "invalid_timestamps": 0,
+    "timestamp_range": {
+      "min": "2023-01-01 00:01:24",
+      "max": "2024-02-29 23:49:35"
+    },
+    "unexpected_categories": {}
+  },
+  "processed_transactions": {
+    "available": true,
+    "rows": 100000,
+    "columns_count": 25,
+    "columns": [
+      "transaction_id",
+      "customer_id",
+      "account_id",
+      "transaction_date",
+      "amount",
+      "transaction_type",
+      "merchant_category",
+      "payment_method",
+      "location",
+      "status",
+      "iqr_anomaly",
+      "log_amount",
+      "transaction_hour",
+      "day_of_week",
+      "transaction_month",
+      "customer_transaction_count",
+      "customer_total_amount",
+      "customer_average_amount",
+      "customer_median_amount",
+      "customer_std_amount",
+      "amount_vs_customer_average",
+      "amount_vs_customer_median",
+      "isolation_prediction",
+      "isolation_score",
+      "ml_anomaly"
+    ],
+    "dtypes": {
+      "transaction_id": "object",
+      "customer_id": "object",
+      "account_id": "object",
+      "transaction_date": "object",
+      "amount": "float64",
+      "transaction_type": "object",
+      "merchant_category": "object",
+      "payment_method": "object",
+      "location": "object",
+      "status": "object",
+      "iqr_anomaly": "int64",
+      "log_amount": "float64",
+      "transaction_hour": "int64",
+      "day_of_week": "int64",
+      "transaction_month": "int64",
+      "customer_transaction_count": "int64",
+      "customer_total_amount": "float64",
+      "customer_average_amount": "float64",
+      "customer_median_amount": "float64",
+      "customer_std_amount": "float64",
+      "amount_vs_customer_average": "float64",
+      "amount_vs_customer_median": "float64",
+      "isolation_prediction": "int64",
+      "isolation_score": "float64",
+      "ml_anomaly": "int64"
+    },
+    "missing_by_column": {},
+    "duplicate_rows": 0,
+    "duplicate_transaction_ids": 0,
+    "missing_or_blank_transaction_ids": 0,
+    "invalid_amounts": 0,
+    "amount_summary": {
+      "count": 100000.0,
+      "mean": 67.6926817,
+      "std": 118.0037021107584,
+      "min": 0.17,
+      "25%": 14.66,
+      "50%": 32.86,
+      "75%": 74.0,
+      "max": 5235.62
+    },
+    "invalid_timestamps": 0,
+    "timestamp_range": {
+      "min": "2023-01-01 00:01:24",
+      "max": "2024-02-29 23:49:35"
+    },
+    "unexpected_categories": {}
+  },
+  "cross_references": {
+    "unknown_customer_references": 0,
+    "unknown_account_references": 0
+  },
+  "schema_comparison": {
+    "processed_extra_columns": [
+      "amount_vs_customer_average",
+      "amount_vs_customer_median",
+      "customer_average_amount",
+      "customer_median_amount",
+      "customer_std_amount",
+      "customer_total_amount",
+      "customer_transaction_count",
+      "day_of_week",
+      "iqr_anomaly",
+      "isolation_prediction",
+      "isolation_score",
+      "log_amount",
+      "ml_anomaly",
+      "transaction_hour",
+      "transaction_month"
+    ],
+    "processed_missing_raw_columns": []
+  },
+  "fraud_labels": {
+    "available": true,
+    "rows": 100000,
+    "columns": [
+      "transaction_id",
+      "is_fraud",
+      "resolution_date"
+    ],
+    "missing_by_column": {},
+    "duplicate_rows": 0,
+    "duplicate_transaction_ids": 0,
+    "invalid_is_fraud_values": [],
+    "distribution": {
+      "False": 97205,
+      "True": 2795
+    },
+    "unmatched_label_ids": 0,
+    "transactions_without_labels": 0,
+    "provenance": "Synthetic probabilistic rule labels generated from amount, location, hour, merchant category and status. Not independently verified fraud ground truth."
+  },
+  "anomaly_output": {
+    "transactions_scored": 100000,
+    "flagged": 5000,
+    "flagged_percentage": 5.0,
+    "prediction_encoding": {
+      "-1": "potential anomaly",
+      "1": "normal"
+    },
+    "isolation_score_summary": {
+      "count": 100000.0,
+      "mean": 0.07250045882610849,
+      "std": 0.040413389691434265,
+      "min": -0.0982085846006538,
+      "25%": 0.045762869133450526,
+      "50%": 0.07396545850982035,
+      "75%": 0.1072632422151795,
+      "max": 0.1535028932478661
+    },
+    "interpretation": "Unsupervised output only; this score is not a fraud probability."
+  }
+}

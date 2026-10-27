@@ -26,7 +26,13 @@ def detect_intent(question: str) -> Intent:
         "what is the definition", "define ", "explain the metric", "calculated",
         "calculation", "what is an iqr", "explain iqr", "what is isolation forest",
         "explain isolation forest", "what is an anomaly", "explain anomaly",
+        "contamination", "which columns", "what columns", "which fields",
+        "api endpoint", "what does the endpoint", "how does the endpoint",
     )) or (
+        "algorithm" in normalized and any(word in normalized for word in ("anomal", "segment", "cluster"))
+    ) or (
+        "feature" in normalized and any(word in normalized for word in ("anomal", "segment", "cluster"))
+    ) or (
         any(word in normalized for word in ("identified", "computed", "derived"))
         and any(word in normalized for word in ("how", "method", "methodology"))
     )

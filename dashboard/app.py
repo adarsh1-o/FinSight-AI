@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from dashboard.api_client import fetch_data, post_data
+from dashboard.api_client import download_data, fetch_data, post_data
 from dashboard.components import format_table, render_chart, render_empty, render_kpis, section_heading
 from dashboard.styles import apply_styles
 
@@ -182,6 +182,55 @@ def render_assistant() -> None:
             st.caption(f"Source: {result.get('source', 'FinSight Analytics')} · Intent: {result.get('intent', 'unknown')}")
 
 
+def render_investigations(params: dict) -> None:
+    section_heading("Transaction Investigation", "Review flagged transactions alongside their original context.")
+    st.caption("Isolation Forest scores rank unusual records; they are not calibrated fraud probabilities. Synthetic labels are generated benchmark labels, not verified case outcomes.")
+    first, second, third, fourth = st.columns(4)
+    with first:
+        anomaly = st.selectbox("Model status", ["all", "flagged", "normal"], format_func=lambda value: {"all": "All transactions", "flagged": "Potential anomaly", "normal": "Model normal"}[value], key="investigation_status")
+    with second:
+        transaction_id = st.text_input("Search transaction ID", key="investigation_id").strip()
+    with third:
+        amount_min = st.number_input("Minimum amount", min_value=0.0, value=0.0, key="investigation_min")
+    with fourth:
+        amount_max = st.number_input("Maximum amount (0 = no limit)", min_value=0.0, value=0.0, key="investigation_max")
+    category = st.selectbox("Investigation category", ["All"] + option_list("/categories"), key="investigation_category")
+    if amount_min > amount_max > 0:
+        st.warning("Minimum amount must be less than or equal to maximum amount.")
+        return
+    query = {**params, "anomaly_status": anomaly, "page": 1, "page_size": 500, "sort_by": "score", "order": "asc"}
+    if category != "All":
+        query["merchant_category"] = category
+    if transaction_id:
+        query["transaction_id"] = transaction_id
+    if amount_min > 0:
+        query["amount_min"] = amount_min
+    if amount_max > 0:
+        query["amount_max"] = amount_max
+    result = fetch_data("/investigations", params=query) or {}
+    items = result.get("items", [])
+    st.caption(f"{result.get('total', 0):,} matching transactions · sorted by lowest anomaly score")
+    if not items:
+        render_empty("No transactions match the investigation filters.")
+        return
+    df = pd.DataFrame(items)
+    columns = ["transaction_id", "transaction_date", "customer_id", "amount", "transaction_type", "merchant_category", "payment_method", "status", "isolation_prediction", "isolation_score", "ml_anomaly", "synthetic_fraud_label"]
+    display = df[[column for column in columns if column in df]].copy()
+    if "isolation_prediction" in display:
+        display["review_status"] = display["isolation_prediction"].map({-1: "Potential anomaly", 1: "Model normal"})
+        display.drop(columns=["isolation_prediction"], inplace=True)
+    if "synthetic_fraud_label" in display:
+        display["synthetic_fraud_label"] = display["synthetic_fraud_label"].map({True: "Synthetic positive", False: "Synthetic negative"})
+    def highlight_flagged(row):
+        color = "background-color: #fff0dc" if row.get("ml_anomaly") == 1 else ""
+        return [color] * len(row)
+    st.dataframe(display.style.apply(highlight_flagged, axis=1), width="stretch", hide_index=True, height=450)
+    export_query = {key: value for key, value in query.items() if key not in {"page", "page_size"}}
+    csv_bytes = download_data("/investigations/export", params=export_query)
+    if csv_bytes:
+        st.download_button("Download filtered results as CSV", csv_bytes, "finsight_investigations.csv", "text/csv")
+
+
 params, reset = render_filters()
 if reset:
     st.cache_data.clear()
@@ -191,13 +240,15 @@ render_header(health is not None)
 kpis = fetch_data("/kpis/", params=params) or {}
 trends = fetch_data("/trends/monthly", params=params) or []
 transactions = fetch_data("/transactions", params={**params, "limit": 1000}) or []
-overview_tab, transaction_tab, anomaly_tab, customer_tab, assistant_tab = st.tabs(["Overview", "Transactions", "Anomalies", "Customers", "AI Assistant"])
+overview_tab, transaction_tab, anomaly_tab, investigation_tab, customer_tab, assistant_tab = st.tabs(["Overview", "Transactions", "Anomalies", "Investigate", "Customers", "AI Assistant"])
 with overview_tab:
     render_overview(kpis, trends)
 with transaction_tab:
     render_transactions(transactions)
 with anomaly_tab:
     render_anomalies(params)
+with investigation_tab:
+    render_investigations(params)
 with customer_tab:
     render_customers(params)
 with assistant_tab:
