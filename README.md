@@ -18,6 +18,16 @@ Data Service / Analytics Service
 Processed FinSight AI Datasets (CSV)
 ```
 
+### Dashboard Screenshots
+
+| Overview | Investigation |
+| --- | --- |
+| ![FinSight AI overview dashboard](docs/screenshots/finsight-overview.png) | ![FinSight AI investigation dashboard](docs/screenshots/finsight-investigation.png) |
+
+| Transaction intelligence | AI assistant |
+| --- | --- |
+| ![FinSight AI transaction intelligence dashboard](docs/screenshots/finsight-transactions.png) | ![FinSight AI grounded assistant dashboard](docs/screenshots/finsight-ai-assistant.png) |
+
 **Technology Stack:**
 - **Backend**: FastAPI, Uvicorn, Pandas
 - **Frontend/Dashboard**: Streamlit, Plotly
