@@ -53,8 +53,19 @@ dashboard passes its active filters to the assistant. Date bounds are inclusive.
 
 ## Configuration
 
-Set `FINSIGHT_LLM_API_KEY` or `OPENAI_API_KEY`. The model defaults to `gpt-4o-mini`; set
-`FINSIGHT_LLM_MODEL` and `FINSIGHT_LLM_BASE_URL` for a compatible provider when needed.
+Gemini is selected with `FINSIGHT_LLM_PROVIDER=gemini` and `GEMINI_API_KEY`; it defaults
+to `gemini-3.8-flash`. OpenAI remains supported and is the backward-compatible default:
+set `FINSIGHT_LLM_PROVIDER=openai` (or omit it) and provide `FINSIGHT_LLM_API_KEY` or
+`OPENAI_API_KEY`; its default model is `gpt-4o-mini`. `FINSIGHT_LLM_MODEL` overrides the
+selected provider's default model. `FINSIGHT_LLM_BASE_URL` optionally overrides the
+OpenAI-compatible chat completions endpoint. The API key must be present in the process
+environment; this application does not load a plain `.env` file automatically.
+
+The Gemini integration uses Google's documented OpenAI-compatible chat completions
+interface over the existing HTTP client, so it adds no SDK dependency. Both providers
+receive the same system prompt, retrieved documentation excerpts or verified analytics
+data, and active dashboard filters. Provider error messages returned by the API are
+sanitized and never include upstream response bodies or credentials.
 
 ## Document index settings
 

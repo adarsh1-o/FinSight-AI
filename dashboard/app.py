@@ -12,7 +12,7 @@ from dashboard.styles import apply_styles
 SPEND_HOVER = "%{y}<br>Total: $%{x:,.2f}<extra></extra>"
 
 
-st.set_page_config(page_title="FinSight AI | Financial Intelligence Platform", page_icon="FS", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="FinSight AI | Financial Intelligence Platform", page_icon=":material/account_balance:", layout="wide", initial_sidebar_state="expanded")
 apply_styles()
 
 
@@ -21,17 +21,18 @@ def option_list(endpoint: str) -> list[str]:
 
 
 def render_filters() -> tuple[dict, bool]:
-    st.sidebar.markdown('<div class="brand-kicker">FinSight AI</div><h2 style="margin-top:0!important">FILTERS</h2>', unsafe_allow_html=True)
-    st.sidebar.caption("Shape the intelligence view with active transaction filters.")
+    st.sidebar.caption("FINSIGHT AI · FINANCIAL INTELLIGENCE")
+    st.sidebar.subheader("Filters", icon=":material/filter_list:")
+    st.sidebar.caption("Refine analytics and assistant context by transaction activity.")
     date_range = fetch_data("/date-range") or {}
     min_date = date.fromisoformat(date_range["min_date"]) if date_range.get("min_date") else date.today()
     max_date = date.fromisoformat(date_range["max_date"]) if date_range.get("max_date") else min_date
 
-    st.sidebar.markdown('<div class="sidebar-label">Date Range</div>', unsafe_allow_html=True)
+    st.sidebar.markdown("**Analysis period**")
     selected_dates = st.sidebar.date_input("Analysis period", (min_date, max_date), min_value=min_date, max_value=max_date, label_visibility="collapsed")
     selected_start, selected_end = (selected_dates if isinstance(selected_dates, tuple) and len(selected_dates) == 2 else (min_date, max_date))
 
-    st.sidebar.markdown('<div class="sidebar-label">Transaction Context</div>', unsafe_allow_html=True)
+    st.sidebar.markdown("**Transaction context**")
     selected_category = st.sidebar.selectbox("Merchant Category", ["All"] + option_list("/categories"))
     selected_payment = st.sidebar.selectbox("Payment Method", ["All"] + option_list("/payment-methods"))
     selected_location = st.sidebar.selectbox("Location", ["All"] + option_list("/locations"))
@@ -43,36 +44,69 @@ def render_filters() -> tuple[dict, bool]:
     for key, value in {"merchant_category": selected_category, "payment_method": selected_payment, "location": selected_location, "transaction_type": selected_type, "status": selected_status}.items():
         if value != "All":
             params[key] = value
-    st.sidebar.markdown('<div class="sidebar-label">View Status</div>', unsafe_allow_html=True)
-    st.sidebar.caption("Showing filtered transaction activity")
+    st.sidebar.caption("Filters apply to analytics and AI answers.")
     return params, reset
 
 
 def render_header(api_online: bool) -> None:
-    status_class = "" if api_online else "status-offline"
-    status_label = "Analytics Engine Online" if api_online else "Analytics Engine Unavailable"
-    st.markdown('<div class="brand-kicker">FINANCIAL INTELLIGENCE PLATFORM</div>', unsafe_allow_html=True)
-    st.title("FinSight AI")
-    st.markdown('<div class="brand-subtitle">Financial analytics, anomaly intelligence and customer behavior</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="status {status_class}"><span class="status-dot"></span>{status_label}</div>', unsafe_allow_html=True)
+    title, status = st.columns([5, 1], vertical_alignment="center")
+    with title:
+        st.caption("FINANCIAL INTELLIGENCE PLATFORM")
+        st.title("FinSight AI", icon=":material/account_balance:")
+        st.markdown('<div class="brand-subtitle">Transaction analytics, anomaly review and customer intelligence</div>', unsafe_allow_html=True)
+    with status:
+        if api_online:
+            st.badge("Analytics API available", icon=":material/check_circle:", color="green")
+        else:
+            st.badge("Analytics API unavailable", icon=":material/error:", color="red")
 
 
-def render_overview(kpis: dict, trends: list) -> None:
+def render_overview(kpis: dict, trends: list, categories: list, segments: list) -> None:
     section_heading("Executive Overview", "A focused view of transaction scale and value across the selected period.")
     render_kpis(kpis)
     if not trends:
         render_empty("No trend data is available for the selected filters.")
-        return
-    df = pd.DataFrame(trends)
-    first, second = st.columns(2)
-    with first:
-        fig = px.bar(df, x="month", y="transaction_count", labels={"month": "Month", "transaction_count": "Transactions"}, title="Monthly transaction volume", color_discrete_sequence=["#5b8def"])
-        fig.update_traces(hovertemplate="%{x}<br>Transactions: %{y:,}<extra></extra>")
-        render_chart(fig, "monthly-volume")
-    with second:
-        fig = px.area(df, x="month", y="transaction_amount", labels={"month": "Month", "transaction_amount": "Value"}, title="Monthly transaction value", color_discrete_sequence=["#55c7d9"])
-        fig.update_traces(hovertemplate="%{x}<br>Value: $%{y:,.2f}<extra></extra>")
-        render_chart(fig, "monthly-value")
+    else:
+        df = pd.DataFrame(trends)
+        first, second = st.columns(2)
+        with first:
+            fig = px.bar(df, x="month", y="transaction_count", labels={"month": "Month", "transaction_count": "Transactions"}, title="Monthly transaction volume", color_discrete_sequence=["#5b8def"])
+            fig.update_traces(hovertemplate="%{x}<br>Transactions: %{y:,}<extra></extra>")
+            fig.update_yaxes(tickformat=",")
+            render_chart(fig, "monthly-volume")
+        with second:
+            fig = px.area(df, x="month", y="transaction_amount", labels={"month": "Month", "transaction_amount": "Transaction value ($)"}, title="Monthly transaction value", color_discrete_sequence=["#55c7d9"])
+            fig.update_traces(hovertemplate="%{x}<br>Value: $%{y:,.2f}<extra></extra>")
+            fig.update_yaxes(tickprefix="$", tickformat="~s")
+            render_chart(fig, "monthly-value")
+
+        if "potential_anomalies" in df:
+            fig = px.bar(df, x="month", y="potential_anomalies", labels={"month": "Month", "potential_anomalies": "Potential anomalies"}, title="Monthly model-flagged activity", color_discrete_sequence=["#f2b866"])
+            fig.update_traces(hovertemplate="%{x}<br>Potential anomalies: %{y:,}<extra></extra>")
+            fig.update_yaxes(tickformat=",")
+            render_chart(fig, "monthly-anomaly-activity")
+        else:
+            render_empty("Monthly potential anomaly counts are not available.")
+
+    category_col, segment_col = st.columns(2)
+    with category_col:
+        if categories:
+            category_df = pd.DataFrame(categories).head(8).sort_values("total_amount", ascending=True)
+            fig = px.bar(category_df, x="total_amount", y="merchant_category", orientation="h", labels={"total_amount": "Transaction value ($)", "merchant_category": "Merchant category"}, title="Category spend", color_discrete_sequence=["#4bd19b"])
+            fig.update_traces(hovertemplate="%{y}<br>Transaction value: $%{x:,.2f}<extra></extra>")
+            fig.update_xaxes(tickprefix="$", tickformat="~s")
+            render_chart(fig, "overview-category-spend", 360)
+        else:
+            render_empty("No category activity matches the selected filters.")
+    with segment_col:
+        if segments:
+            segment_df = pd.DataFrame(segments).sort_values("customer_count", ascending=True)
+            fig = px.bar(segment_df, x="customer_count", y="segment_name", orientation="h", labels={"customer_count": "Customers", "segment_name": "Customer segment"}, title="Customer segment distribution", color_discrete_sequence=["#55c7d9"])
+            fig.update_traces(hovertemplate="%{y}<br>Customers: %{x:,}<extra></extra>")
+            fig.update_xaxes(tickformat=",")
+            render_chart(fig, "overview-segment-distribution", 360)
+        else:
+            render_empty("No customer segment data matches the selected filters.")
 
 
 def render_transactions(transactions: list) -> None:
@@ -88,7 +122,7 @@ def render_transactions(transactions: list) -> None:
             if counts.empty:
                 render_empty(f"No {title.lower()} data")
             else:
-                fig = px.bar(counts, x="count", y=field, orientation="h", title=title, color_discrete_sequence=["#5b8def"])
+                fig = px.bar(counts, x="count", y=field, orientation="h", labels={"count": "Transactions", field: title}, title=title, color_discrete_sequence=["#5b8def"])
                 fig.update_traces(hovertemplate="%{y}<br>Count: %{x:,}<extra></extra>")
                 render_chart(fig, f"{field}-counts", 270)
     section_heading("Spending Analysis", "Where selected-period value is concentrated.")
@@ -96,12 +130,14 @@ def render_transactions(transactions: list) -> None:
     by_type = df.groupby("transaction_type", as_index=False).agg(total_spend=("amount", "sum")).sort_values("total_spend", ascending=False)
     first, second = st.columns(2)
     with first:
-        fig = px.bar(by_category, x="total_spend", y="merchant_category", orientation="h", title="Spending by merchant category", color_discrete_sequence=["#4bd19b"])
+        fig = px.bar(by_category, x="total_spend", y="merchant_category", orientation="h", labels={"total_spend": "Transaction value ($)", "merchant_category": "Merchant category"}, title="Spending by merchant category", color_discrete_sequence=["#4bd19b"])
         fig.update_traces(hovertemplate=SPEND_HOVER)
+        fig.update_xaxes(tickprefix="$", tickformat="~s")
         render_chart(fig, "spend-category")
     with second:
-        fig = px.bar(by_type, x="total_spend", y="transaction_type", orientation="h", title="Spending by transaction type", color_discrete_sequence=["#f2b866"])
+        fig = px.bar(by_type, x="total_spend", y="transaction_type", orientation="h", labels={"total_spend": "Transaction value ($)", "transaction_type": "Transaction type"}, title="Spending by transaction type", color_discrete_sequence=["#f2b866"])
         fig.update_traces(hovertemplate="%{y}<br>Total: $%{x:,.2f}<extra></extra>")
+        fig.update_xaxes(tickprefix="$", tickformat="~s")
         render_chart(fig, "spend-type")
 
 
@@ -122,25 +158,29 @@ def render_anomalies(params: dict) -> None:
         render_empty("No potential anomalies match the current filters.")
 
 
-def render_customers(params: dict) -> None:
+def render_customers(params: dict, segments: list | None = None) -> None:
     section_heading("Customer Intelligence", "Stage 4 segment assignments with metrics recalculated for the selected activity.")
-    segments = fetch_data("/segments/summary", params=params) or []
+    segments = segments if segments is not None else (fetch_data("/segments/summary", params=params) or [])
     if segments:
         df = pd.DataFrame(segments)
         first, second = st.columns(2)
         with first:
-            fig = px.bar(df, x="customer_count", y="segment_name", orientation="h", title="Customer segment distribution", color_discrete_sequence=["#5b8def"])
+            fig = px.bar(df, x="customer_count", y="segment_name", orientation="h", labels={"customer_count": "Customers", "segment_name": "Segment"}, title="Customer segment distribution", color_discrete_sequence=["#5b8def"])
+            fig.update_traces(hovertemplate="%{y}<br>Customers: %{x:,}<extra></extra>")
             render_chart(fig, "segment-distribution")
         with second:
-            fig = px.bar(df, x="total_spend", y="segment_name", orientation="h", title="Total spend by segment", color_discrete_sequence=["#4bd19b"])
+            fig = px.bar(df, x="total_spend", y="segment_name", orientation="h", labels={"total_spend": "Transaction value ($)", "segment_name": "Segment"}, title="Total spend by segment", color_discrete_sequence=["#4bd19b"])
             fig.update_traces(hovertemplate=SPEND_HOVER)
+            fig.update_xaxes(tickprefix="$", tickformat="~s")
             render_chart(fig, "segment-spend")
         first, second = st.columns(2)
         with first:
-            fig = px.bar(df, x="average_transaction_count", y="segment_name", orientation="h", title="Transaction frequency by segment", color_discrete_sequence=["#55c7d9"])
+            fig = px.bar(df, x="average_transaction_count", y="segment_name", orientation="h", labels={"average_transaction_count": "Average transactions per customer", "segment_name": "Segment"}, title="Transaction frequency by segment", color_discrete_sequence=["#55c7d9"])
+            fig.update_traces(hovertemplate="%{y}<br>Average transactions: %{x:.2f}<extra></extra>")
             render_chart(fig, "segment-frequency")
         with second:
-            fig = px.bar(df, x="average_anomaly_rate", y="segment_name", orientation="h", title="Anomaly rate by segment", color_discrete_sequence=["#f2b866"])
+            fig = px.bar(df, x="average_anomaly_rate", y="segment_name", orientation="h", labels={"average_anomaly_rate": "Potential anomaly rate", "segment_name": "Segment"}, title="Potential anomaly rate by segment", color_discrete_sequence=["#f2b866"])
+            fig.update_traces(hovertemplate="%{y}<br>Potential anomaly rate: %{x:.1%}<extra></extra>")
             fig.update_xaxes(tickformat=".1%")
             render_chart(fig, "segment-anomaly")
     else:
@@ -153,7 +193,7 @@ def render_customers(params: dict) -> None:
 
 
 def render_assistant() -> None:
-    section_heading("AI Financial Assistant", "Ask grounded questions about the currently selected FinSight activity.")
+    section_heading("AI financial assistant", "Ask grounded questions about FinSight analytics and project methodology.")
     examples = [
         "What is the total transaction value?",
         "Which merchant category has the highest spending?",
@@ -163,10 +203,10 @@ def render_assistant() -> None:
     ]
     if "ai_history" not in st.session_state:
         st.session_state.ai_history = []
-    st.markdown('<div class="assistant"><div class="eyebrow">Grounded analytics</div><div class="assistant-title">Ask FinSight about your financial data</div><div class="assistant-copy">Answers are based on verified FinSight analytics and the active dashboard filters.</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="assistant"><div class="eyebrow">Grounded analytics</div><div class="assistant-title">Your financial activity, with evidence</div><div class="assistant-copy">Answers use verified FinSight analytics, retrieved project documentation and the active filters.</div></div>', unsafe_allow_html=True)
     selected_example = st.selectbox("Example questions", ["Choose an example..."] + examples, label_visibility="collapsed")
     question = st.text_input("Your question", value="" if selected_example == "Choose an example..." else selected_example, placeholder="e.g. Which category has the highest spending?", label_visibility="collapsed")
-    if st.button("Ask FinSight", type="primary", width="stretch"):
+    if st.button("Ask FinSight", type="primary", width="stretch", icon=":material/send:"):
         if not question.strip():
             st.warning("Enter a question about the FinSight data.")
         else:
@@ -176,10 +216,24 @@ def render_assistant() -> None:
                 st.session_state.ai_history.append({"question": question, "result": result})
     for item in reversed(st.session_state.ai_history):
         result = item["result"]
-        with st.container(border=True):
-            st.caption(f"You asked: {item['question']}")
+        with st.chat_message("user"):
+            st.markdown(item["question"])
+        with st.chat_message("assistant", avatar=":material/auto_awesome:"):
             st.markdown(result.get("answer", "The AI service returned no answer."))
             st.caption(f"Source: {result.get('source', 'FinSight Analytics')} · Intent: {result.get('intent', 'unknown')}")
+            data = result.get("data") or {}
+            evidence = {key: value for key, value in data.items() if key not in {"filters", "documentation"}}
+            if evidence:
+                with st.expander("View verified analytics evidence", icon=":material/fact_check:"):
+                    st.json(evidence, expanded=False)
+            documents = data.get("documentation") or []
+            if documents:
+                with st.expander(f"Retrieved documentation · {len(documents)} source(s)", icon=":material/menu_book:"):
+                    for document in documents:
+                        source = document.get("source", "Project documentation")
+                        section = document.get("section", "")
+                        st.markdown(f"**{source}**" + (f" · {section}" if section else ""))
+                        st.caption(document.get("excerpt", ""))
 
 
 def render_investigations(params: dict) -> None:
@@ -221,14 +275,16 @@ def render_investigations(params: dict) -> None:
         display.drop(columns=["isolation_prediction"], inplace=True)
     if "synthetic_fraud_label" in display:
         display["synthetic_fraud_label"] = display["synthetic_fraud_label"].map({True: "Synthetic positive", False: "Synthetic negative"})
+    display = format_table(display, ["amount"])
     def highlight_flagged(row):
         color = "background-color: #fff0dc" if row.get("ml_anomaly") == 1 else ""
         return [color] * len(row)
     st.dataframe(display.style.apply(highlight_flagged, axis=1), width="stretch", hide_index=True, height=450)
+    st.caption("The isolation score ranks unusual records; it is not a calibrated fraud probability. Synthetic labels are benchmark labels only.")
     export_query = {key: value for key, value in query.items() if key not in {"page", "page_size"}}
     csv_bytes = download_data("/investigations/export", params=export_query)
     if csv_bytes:
-        st.download_button("Download filtered results as CSV", csv_bytes, "finsight_investigations.csv", "text/csv")
+        st.download_button("Download filtered results as CSV", csv_bytes, "finsight_investigations.csv", "text/csv", icon=":material/download:")
 
 
 params, reset = render_filters()
@@ -239,10 +295,19 @@ health = fetch_data("/date-range")
 render_header(health is not None)
 kpis = fetch_data("/kpis/", params=params) or {}
 trends = fetch_data("/trends/monthly", params=params) or []
+category_summary = fetch_data("/transactions/summary/categories", params=params) or []
+segments = fetch_data("/segments/summary", params=params) or []
 transactions = fetch_data("/transactions", params={**params, "limit": 1000}) or []
-overview_tab, transaction_tab, anomaly_tab, investigation_tab, customer_tab, assistant_tab = st.tabs(["Overview", "Transactions", "Anomalies", "Investigate", "Customers", "AI Assistant"])
+overview_tab, transaction_tab, anomaly_tab, investigation_tab, customer_tab, assistant_tab = st.tabs([
+    ":material/dashboard: Overview",
+    ":material/receipt_long: Transactions",
+    ":material/query_stats: Anomalies",
+    ":material/search: Investigate",
+    ":material/groups: Customers",
+    ":material/auto_awesome: AI assistant",
+])
 with overview_tab:
-    render_overview(kpis, trends)
+    render_overview(kpis, trends, category_summary, segments)
 with transaction_tab:
     render_transactions(transactions)
 with anomaly_tab:
@@ -250,7 +315,7 @@ with anomaly_tab:
 with investigation_tab:
     render_investigations(params)
 with customer_tab:
-    render_customers(params)
+    render_customers(params, segments)
 with assistant_tab:
     render_assistant()
-st.markdown('<div class="footer">FinSight AI · Financial Analytics Platform<br><span>Data → Analytics → ML → API → AI</span></div>', unsafe_allow_html=True)
+st.caption("FinSight AI · Data → Analytics → ML → API → grounded AI")

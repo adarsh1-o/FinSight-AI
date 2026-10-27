@@ -1,12 +1,25 @@
 import os
 
 import pytest
+import requests
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from api.ai.intent import Intent
-from api.ai.service import GroundedAIService, LLMClient, LLMRequestError, MissingLLMCredentials
-from api.assistant.schemas import AssistantResponse
+from api.ai.prompts import SYSTEM_PROMPT
+from api.ai.service import (
+    GroundedAIService,
+    LLMAuthenticationError,
+    LLMClient,
+    LLMRateLimitError,
+    LLMRequestError,
+    LLMUnsupportedModelError,
+    MissingLLMCredentials,
+    UnsupportedLLMProvider,
+)
+from api.assistant.schemas import AssistantRequest, AssistantResponse
 from api.main import app
+from api.routers.ai import query_ai
 
 
 class FakeLLM:
@@ -79,13 +92,134 @@ def test_unsupported_question_does_not_call_llm():
 
 
 def test_missing_credentials_is_explicit(monkeypatch):
+    monkeypatch.delenv("FINSIGHT_LLM_PROVIDER", raising=False)
     monkeypatch.delenv("FINSIGHT_LLM_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(MissingLLMCredentials):
         LLMClient().complete("What is the total transaction value?", Intent.KPI, {"total_transactions": 1}, {})
 
 
+def test_gemini_request_uses_gemini_environment_and_preserves_grounded_context(monkeypatch):
+    monkeypatch.setenv("FINSIGHT_LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "unit-test-key")
+    monkeypatch.setenv("FINSIGHT_LLM_MODEL", "gemini-test-model")
+    monkeypatch.delenv("FINSIGHT_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": "Grounded Gemini answer"}}]}
+
+    def request(url, **kwargs):
+        captured.update(url=url, **kwargs)
+        return Response()
+
+    client = LLMClient(request=request)
+    evidence = {"total_transactions": 8, "documentation": [{"source": "docs/test.md", "excerpt": "Evidence"}]}
+    answer = client.complete("Summarize verified facts", Intent.KPI, evidence, {"date_from": "2024-01-01"})
+
+    assert answer == "Grounded Gemini answer"
+    assert captured["url"] == "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer unit-test-key"
+    assert captured["json"]["model"] == "gemini-test-model"
+    assert captured["json"]["messages"][0]["content"] == SYSTEM_PROMPT
+    assert "total_transactions" in captured["json"]["messages"][1]["content"]
+    assert "date_from" in captured["json"]["messages"][1]["content"]
+
+
+def test_gemini_requires_its_key_without_falling_back_to_openai(monkeypatch):
+    monkeypatch.setenv("FINSIGHT_LLM_PROVIDER", "gemini")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    with pytest.raises(MissingLLMCredentials, match="GEMINI_API_KEY"):
+        LLMClient().complete("question", Intent.KPI, {}, {})
+
+
+def test_existing_openai_provider_configuration_remains_supported(monkeypatch):
+    monkeypatch.delenv("FINSIGHT_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("FINSIGHT_LLM_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.delenv("FINSIGHT_LLM_MODEL", raising=False)
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": "OpenAI answer"}}]}
+
+    def request(url, **kwargs):
+        captured.update(url=url, **kwargs)
+        return Response()
+
+    assert LLMClient(request=request).complete("question", Intent.KPI, {}, {}) == "OpenAI answer"
+    assert captured["url"] == "https://api.openai.com/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer openai-test-key"
+    assert captured["json"]["model"] == "gpt-4o-mini"
+
+
+def test_unsupported_provider_is_rejected_without_credentials(monkeypatch):
+    monkeypatch.setenv("FINSIGHT_LLM_PROVIDER", "unknown")
+    with pytest.raises(UnsupportedLLMProvider):
+        LLMClient().complete("question", Intent.KPI, {}, {})
+
+
+@pytest.mark.parametrize(("status", "error_type"), [
+    (401, LLMAuthenticationError),
+    (403, LLMAuthenticationError),
+    (429, LLMRateLimitError),
+    (404, LLMUnsupportedModelError),
+])
+def test_provider_http_errors_are_classified_without_exposing_body(monkeypatch, status, error_type):
+    monkeypatch.setenv("FINSIGHT_LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "unit-test-key")
+
+    class FailedResponse:
+        status_code = status
+        text = "sensitive provider details"
+
+        def raise_for_status(self):
+            raise requests.HTTPError("sensitive provider details", response=self)
+
+    with pytest.raises(error_type) as caught:
+        LLMClient(request=lambda *args, **kwargs: FailedResponse()).complete("question", Intent.KPI, {}, {})
+    assert "sensitive provider details" not in str(caught.value)
+
+
+def test_empty_provider_response_is_rejected(monkeypatch):
+    monkeypatch.setenv("FINSIGHT_LLM_API_KEY", "unit-test-key")
+    monkeypatch.delenv("FINSIGHT_LLM_PROVIDER", raising=False)
+
+    class EmptyResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": "   "}}]}
+
+    with pytest.raises(LLMRequestError, match="empty answer"):
+        LLMClient(request=lambda *args, **kwargs: EmptyResponse()).complete("question", Intent.KPI, {}, {})
+
+
+def test_network_failure_is_sanitized(monkeypatch):
+    monkeypatch.setenv("FINSIGHT_LLM_API_KEY", "unit-test-key")
+    monkeypatch.setenv("FINSIGHT_LLM_PROVIDER", "openai")
+
+    def fail_request(*args, **kwargs):
+        raise requests.ConnectionError("network failure with unrelated private details")
+
+    with pytest.raises(LLMRequestError, match="could not return a valid answer") as caught:
+        LLMClient(request=fail_request).complete("question", Intent.KPI, {}, {})
+    assert "private details" not in str(caught.value)
+
+
 def test_provider_failure_is_safe(monkeypatch):
+    monkeypatch.setenv("FINSIGHT_LLM_PROVIDER", "openai")
     monkeypatch.setenv("FINSIGHT_LLM_API_KEY", "test-key")
     class FailedResponse:
         def raise_for_status(self):
@@ -96,6 +230,25 @@ def test_provider_failure_is_safe(monkeypatch):
 
     with pytest.raises(LLMRequestError):
         LLMClient(request=lambda *args, **kwargs: request()).complete("What is the total transaction value?", Intent.KPI, {}, {})
+
+
+@pytest.mark.parametrize(("error", "status"), [
+    (LLMRateLimitError("The language model is rate limited. Try again later."), 429),
+    (LLMAuthenticationError("The language model rejected the configured API key or its access."), 502),
+    (LLMUnsupportedModelError("The configured language model was not found or is unsupported."), 502),
+    (LLMRequestError("The language model could not return a valid answer."), 502),
+    (MissingLLMCredentials("Set GEMINI_API_KEY to enable Gemini answers."), 503),
+])
+def test_ai_endpoint_maps_provider_errors_to_safe_status(monkeypatch, error, status):
+    class FailingAssistant:
+        def answer(self, request):
+            raise error
+
+    monkeypatch.setattr("api.routers.ai.assistant_service", FailingAssistant())
+    with pytest.raises(HTTPException) as caught:
+        query_ai(AssistantRequest(question="Summarize verified data"))
+    assert caught.value.status_code == status
+    assert "unit-test-key" not in str(caught.value.detail)
 
 
 def test_ai_endpoint_delegates_to_assistant_service_and_preserves_filters(monkeypatch):

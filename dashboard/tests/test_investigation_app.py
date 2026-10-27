@@ -69,14 +69,26 @@ def install_api_mocks(monkeypatch):
             return ROWS
         if endpoint == "/kpis/":
             return {"total_transactions": 4, "total_transaction_amount": 490, "average_transaction_amount": 122.5,
-                    "unique_customers": 4, "potential_anomalies": 2}
+                    "unique_customers": 4, "potential_anomalies": 2, "anomaly_percentage": 50}
         if endpoint == "/trends/monthly":
-            return [{"month": "2024-01", "transaction_count": 2, "transaction_amount": 70}]
+            return [{"month": "2024-01", "transaction_count": 2, "transaction_amount": 70, "potential_anomalies": 1}]
+        if endpoint == "/transactions/summary/categories":
+            return [
+                {"merchant_category": "Amazon", "transaction_count": 2, "total_amount": 420, "average_amount": 210},
+                {"merchant_category": "Grocery", "transaction_count": 2, "total_amount": 70, "average_amount": 35},
+            ]
         if endpoint == "/anomalies/summary":
             return {"iqr_anomaly_count": 0, "ml_anomaly_count": 2, "overlap_count": 0, "anomaly_percentage": 50}
         if endpoint == "/anomalies/":
             return ROWS[:2]
-        if endpoint in {"/segments/summary", "/customers/top"}:
+        if endpoint == "/segments/summary":
+            return [
+                {"segment_name": "Frequent", "customer_count": 2, "total_spend": 440,
+                 "average_transaction_count": 2, "average_anomaly_rate": 0.5},
+                {"segment_name": "Occasional", "customer_count": 2, "total_spend": 50,
+                 "average_transaction_count": 1, "average_anomaly_rate": 0},
+            ]
+        if endpoint == "/customers/top":
             return []
         return []
 
@@ -166,3 +178,51 @@ def test_investigation_empty_results_and_invalid_amount_range(monkeypatch):
     assert not at.exception
     assert len(calls) == previous_call_count  # invalid bounds stop before the investigation request
     assert any("Minimum amount must be less than or equal to maximum amount." in element.value for element in at.warning)
+
+
+def test_dashboard_kpis_match_filtered_api_response(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    install_api_mocks(monkeypatch)
+    at = AppTest.from_file(str(APP_PATH)).run(timeout=30)
+    assert not at.exception
+    values = {metric.label: metric.value for metric in at.metric}
+    assert values["Total transaction value"] == "$490.00"
+    assert values["Transactions"] == "4"
+    assert values["Potential anomalies"] == "2"
+    assert values["Anomaly rate"] == "50.00%"
+    assert values["Active customers"] == "4"
+    assert values["Average transaction"] == "$122.50"
+
+
+def test_assistant_receives_active_dashboard_filters_and_shows_grounded_evidence(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    install_api_mocks(monkeypatch)
+    calls = []
+
+    def post_data(endpoint: str, payload: dict):
+        calls.append((endpoint, payload))
+        return {"answer": "Four transactions were in the supplied result.", "intent": "kpi",
+                "source": "FinSight Analytics", "data": {"total_transactions": 4, "filters": payload["filters"]}}
+
+    monkeypatch.setattr(api_client, "post_data", post_data)
+    at = AppTest.from_file(str(APP_PATH)).run(timeout=30)
+    date_widget = next(element for element in at.date_input if element.label == "Analysis period")
+    at = date_widget.set_value((date(2024, 2, 1), date(2024, 2, 28))).run()
+    category_widget = next(element for element in at.selectbox if element.label == "Merchant Category")
+    at = category_widget.set_value("Amazon").run()
+    question_widget = next(element for element in at.text_input if element.label == "Your question")
+    at = question_widget.set_value("How many transactions are in scope?").run()
+    ask_button = next(element for element in at.button if element.label == "Ask FinSight")
+    at = ask_button.click().run()
+
+    assert not at.exception
+    assert len(calls) == 1
+    endpoint, payload = calls[0]
+    assert endpoint == "/ai/query"
+    assert payload["question"] == "How many transactions are in scope?"
+    assert payload["filters"]["merchant_category"] == "Amazon"
+    assert payload["filters"]["date_from"] == "2024-02-01"
+    assert payload["filters"]["date_to"] == "2024-02-28"
+    assert any("Four transactions were in the supplied result." in item.value for item in at.markdown)

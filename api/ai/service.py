@@ -25,6 +25,22 @@ class LLMRequestError(AIServiceError):
     pass
 
 
+class LLMRateLimitError(LLMRequestError):
+    pass
+
+
+class LLMAuthenticationError(LLMRequestError):
+    pass
+
+
+class LLMUnsupportedModelError(LLMRequestError):
+    pass
+
+
+class UnsupportedLLMProvider(AIServiceError):
+    pass
+
+
 FILTER_KEYS = (
     "date_from",
     "date_to",
@@ -112,13 +128,25 @@ def retrieve_verified_data(intent: Intent, filters: dict[str, str], question: st
 
 class LLMClient:
     def __init__(self, request: Callable[..., Any] | None = None):
-        self.api_key = os.getenv("FINSIGHT_LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
-        self.model = os.getenv("FINSIGHT_LLM_MODEL", "gpt-4o-mini")
-        self.base_url = os.getenv("FINSIGHT_LLM_BASE_URL", "https://api.openai.com/v1/chat/completions")
+        self.provider = os.getenv("FINSIGHT_LLM_PROVIDER", "openai").strip().lower()
+        if self.provider == "gemini":
+            self.api_key = os.getenv("GEMINI_API_KEY")
+            default_model = "gemini-3.8-flash"
+            default_url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        else:
+            self.api_key = os.getenv("FINSIGHT_LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+            default_model = "gpt-4o-mini"
+            default_url = "https://api.openai.com/v1/chat/completions"
+        self.model = os.getenv("FINSIGHT_LLM_MODEL") or default_model
+        self.base_url = os.getenv("FINSIGHT_LLM_BASE_URL") or default_url
         self._request = request or requests.post
 
     def complete(self, question: str, intent: Intent, data: dict[str, Any], filters: dict[str, str]) -> str:
+        if self.provider not in {"openai", "gemini"}:
+            raise UnsupportedLLMProvider("FINSIGHT_LLM_PROVIDER must be 'openai' or 'gemini'.")
         if not self.api_key:
+            if self.provider == "gemini":
+                raise MissingLLMCredentials("Set GEMINI_API_KEY to enable Gemini answers.")
             raise MissingLLMCredentials("Set FINSIGHT_LLM_API_KEY or OPENAI_API_KEY to enable answers.")
         payload = {
             "model": self.model,
@@ -137,6 +165,15 @@ class LLMClient:
             )
             response.raise_for_status()
             content = response.json().get("choices", [{}])[0].get("message", {}).get("content")
+        except requests.HTTPError as error:
+            status = error.response.status_code if error.response is not None else None
+            if status == 401 or status == 403:
+                raise LLMAuthenticationError("The language model rejected the configured API key or its access.") from error
+            if status == 429:
+                raise LLMRateLimitError("The language model is rate limited. Try again later.") from error
+            if status == 404:
+                raise LLMUnsupportedModelError("The configured language model was not found or is unsupported.") from error
+            raise LLMRequestError("The language model could not return a valid answer.") from error
         except (requests.RequestException, RuntimeError, ValueError, IndexError, KeyError, TypeError) as error:
             raise LLMRequestError("The language model could not return a valid answer.") from error
         if not isinstance(content, str) or not content.strip():

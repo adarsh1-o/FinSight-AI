@@ -16,16 +16,17 @@ def section_heading(title: str, caption: str = "") -> None:
 
 def render_kpis(kpis: dict) -> None:
     cards = [
-        ("Total Transactions", f"{kpis.get('total_transactions', 0):,}", "Across selected period"),
-        ("Total Transaction Value", f"${kpis.get('total_transaction_amount', 0):,.0f}", "Filtered transaction value"),
-        ("Average Transaction", f"${kpis.get('average_transaction_amount', 0):,.2f}", "Average ticket size"),
-        ("Unique Customers", f"{kpis.get('unique_customers', 0):,}", "Customers in selected activity"),
-        ("Potential Anomalies", f"{kpis.get('potential_anomalies', 0):,}", "Model-flagged activity"),
+        ("Total transaction value", f"${(kpis.get('total_transaction_amount') or 0):,.2f}", "Value across the selected activity", ":material/payments:"),
+        ("Transactions", f"{(kpis.get('total_transactions') or 0):,}", "Count in the selected period", ":material/receipt_long:"),
+        ("Potential anomalies", f"{(kpis.get('potential_anomalies') or 0):,}", "Model-flagged activity; not confirmed fraud", ":material/warning:"),
+        ("Anomaly rate", f"{(kpis.get('anomaly_percentage') or 0):.2f}%", "Share of transactions flagged by the model", ":material/monitoring:"),
+        ("Active customers", f"{(kpis.get('unique_customers') or 0):,}", "Unique customers with activity in this period", ":material/groups:"),
+        ("Average transaction", f"${(kpis.get('average_transaction_amount') or 0):,.2f}", "Average value per transaction", ":material/attach_money:"),
     ]
-    for column, (label, value, description) in zip(st.columns(5), cards):
-        with column:
-            st.metric(label, value, help=description)
-            st.caption(description)
+    for row_start in range(0, len(cards), 3):
+        with st.container(horizontal=True, gap="small"):
+            for label, value, description, icon in cards[row_start:row_start + 3]:
+                st.metric(label, value, help=description, icon=icon, border=True)
 
 
 def chart_layout(fig, height: int = 320):

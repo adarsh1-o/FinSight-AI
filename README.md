@@ -76,8 +76,8 @@ The assistant routes numerical questions to existing FinSight analytics services
 
 The retriever uses scikit-learn's local `HashingVectorizer` (word and bigram vectors) and SQLite. It adds no model download, paid embedding service, or new package. The vectors are lexical, so semantically similar terms that share few words may not match.
 
-1. Set `FINSIGHT_LLM_API_KEY` or `OPENAI_API_KEY` to a valid provider key. The service reads environment variables; a plain `.env` file is not loaded automatically.
-2. Optionally set `FINSIGHT_LLM_MODEL` and `FINSIGHT_LLM_BASE_URL` for a compatible provider.
+1. Set `FINSIGHT_LLM_PROVIDER=gemini` and `GEMINI_API_KEY` for Google Gemini. The default Gemini model is `gemini-3.8-flash`; override it with `FINSIGHT_LLM_MODEL` when needed. For OpenAI, omit the provider setting or use `FINSIGHT_LLM_PROVIDER=openai` with `FINSIGHT_LLM_API_KEY` or `OPENAI_API_KEY` (default model `gpt-4o-mini`). The service reads process environment variables; a plain `.env` file is not loaded automatically.
+2. Optionally set `FINSIGHT_LLM_BASE_URL` to override the selected provider's OpenAI-compatible chat completions URL.
 3. Build or refresh the local documentation index after changing documentation:
 
 ```bash
